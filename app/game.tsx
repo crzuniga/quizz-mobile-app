@@ -1,13 +1,23 @@
-import AsyncStorage from "@react-native-async-storage/async-storage";
-import { useRouter } from "expo-router";
-import React, { useEffect, useRef, useState } from "react";
-import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useRoute } from '@react-navigation/native';
+import { useRouter } from 'expo-router';
+import { useEffect, useRef, useState } from 'react';
+import {
+  Dimensions,
+  Image,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from 'react-native';
 
 type Question = {
   text: string;
   answers: string[];
   correctIndex: number;
   points?: number;
+  image?: string;
 };
 
 type Team = {
@@ -27,37 +37,55 @@ export default function GameScreen() {
   const [showCorrect, setShowCorrect] = useState(false);
   const [usedTeams, setUsedTeams] = useState<number[]>([]);
 
+  const [screenWidth, setScreenWidth] = useState(Dimensions.get('window').width);
+  const [screenHeight, setScreenHeight] = useState(Dimensions.get('window').height);
+  const isLandscape = screenWidth > screenHeight;
+
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   const router = useRouter();
+  const route = useRoute();
+
+  // Detect orientation changes
+  useEffect(() => {
+    const subscription = Dimensions.addEventListener('change', ({ window }) => {
+      setScreenWidth(window.width);
+      setScreenHeight(window.height);
+    });
+    return () => subscription?.remove();
+  }, []);
 
   // Load quiz setup
   useEffect(() => {
-    const loadQuiz = async () => {
-      const stored = await AsyncStorage.getItem("quizData");
+    const loadQuiz = async (quizId: string) => {
+      const stored = await AsyncStorage.getItem('quizzes');
       if (stored) {
         const parsed = JSON.parse(stored);
-        setTeams(parsed.teams.map((t: any) => ({ ...t, points: 0 })));
-        setQuestions(parsed.questions);
-        setTimePerQuestion(parsed.timePerQuestion || 15);
-        setTimeLeft(parsed.timePerQuestion || 15);
+        const allQuizzes = Array.isArray(parsed) ? parsed : [parsed];
+
+        // Find the quiz with the matching id
+        const quiz = allQuizzes.find((q: any) => q.id === quizId);
+        if (quiz) {
+          setTeams(quiz.teams.map((t: any) => ({ ...t, points: 0 })));
+          setQuestions(quiz.questions);
+          setTimePerQuestion(quiz.timePerQuestion || 15);
+          setTimeLeft(quiz.timePerQuestion || 15);
+        } else {
+          console.warn("Quiz not found with id:", quizId);
+        }
       }
     };
-    loadQuiz();
+    const quizId = route.params?.id; // or useSearchParams if using expo-router
+  if (quizId) loadQuiz(quizId);
   }, []);
 
-  // Handle countdown timer
+  // Countdown timer
   useEffect(() => {
     if (showCorrect) return;
-
     if (timeLeft <= 0) {
-      handleWrongAnswer(); // timeout acts like a wrong answer
+      handleWrongAnswer();
       return;
     }
-
-    timerRef.current = setTimeout(() => {
-      setTimeLeft((prev) => prev - 1);
-    }, 1000);
-
+    timerRef.current = setTimeout(() => setTimeLeft(prev => prev - 1), 1000);
     return () => {
       if (timerRef.current) clearTimeout(timerRef.current);
     };
@@ -67,46 +95,35 @@ export default function GameScreen() {
 
   const handleAnswer = (index: number) => {
     if (selectedAnswer !== null || showCorrect) return;
-
     setSelectedAnswer(index);
-    setUsedTeams((prev) => [...prev, currentTeamIndex]);
+    setUsedTeams(prev => [...prev, currentTeamIndex]);
 
     const correct = index === currentQuestion.correctIndex;
-
     if (correct) {
-      // ✅ correct
       const updatedTeams = [...teams];
       updatedTeams[currentTeamIndex].points += currentQuestion.points || 50;
       setTeams(updatedTeams);
       setShowCorrect(true);
       if (timerRef.current) clearTimeout(timerRef.current);
     } else {
-      // ❌ wrong
-      setTimeout(() => {
-        handleWrongAnswer();
-      }, 1500);
+      setTimeout(() => handleWrongAnswer(), 1500);
     }
   };
 
   const handleWrongAnswer = () => {
     if (timerRef.current) clearTimeout(timerRef.current);
 
-    // mark current team as having used their chance (even if time expired)
-    setUsedTeams((prev) => [...prev, currentTeamIndex]);
-
     const nextTeamIndex = teams.findIndex(
       (_, idx) => !usedTeams.includes(idx) && idx !== currentTeamIndex
     );
 
     if (nextTeamIndex !== -1) {
-      // Another team still has a chance
       setTimeout(() => {
         setCurrentTeamIndex(nextTeamIndex);
         setSelectedAnswer(null);
         setTimeLeft(timePerQuestion);
       }, 500);
     } else {
-      // 🚨 No teams left → reveal correct answer
       setShowCorrect(true);
       setTimeLeft(0);
     }
@@ -114,8 +131,8 @@ export default function GameScreen() {
 
   const goToNextQuestion = () => {
     if (currentQuestionIndex < questions.length - 1) {
-      setCurrentQuestionIndex((prev) => prev + 1);
-      setCurrentTeamIndex(0); // restart from team 1
+      setCurrentQuestionIndex(prev => prev + 1);
+      setCurrentTeamIndex(0);
       setSelectedAnswer(null);
       setShowCorrect(false);
       setUsedTeams([]);
@@ -126,8 +143,8 @@ export default function GameScreen() {
   };
 
   const saveResultsAndFinish = async () => {
-    await AsyncStorage.setItem("results", JSON.stringify({ teams }));
-    router.push("/final");
+    await AsyncStorage.setItem('results', JSON.stringify({ teams }));
+    router.push('/final');
   };
 
   if (!currentQuestion) {
@@ -139,34 +156,46 @@ export default function GameScreen() {
   }
 
   return (
-    <View style={styles.container}>
-      <Text style={styles.title}>
-        Team Turn: {teams[currentTeamIndex]?.name}
-      </Text>
+    <ScrollView contentContainerStyle={styles.container}>
+      <Text style={styles.title}>Team Turn: {teams[currentTeamIndex]?.name}</Text>
+
       <Text style={styles.timer}>⏱ {timeLeft}s</Text>
 
       <Text style={styles.question}>{currentQuestion.text}</Text>
 
-      <View style={styles.answers}>
-        {currentQuestion.answers.map((answer, idx) => {
-          let bg = "#eee";
+      {currentQuestion.image ? (
+        <Image
+          source={{ uri: currentQuestion.image }}
+          style={{
+            width: screenWidth - 40,
+            height: isLandscape
+              ? Math.min(screenHeight * 0.6, 300)
+              : 180,
+            borderRadius: 10,
+            marginBottom: 20,
+          }}
+          resizeMode="contain"
+        />
+      ) : null}
 
+      <View
+        style={{
+          flexDirection: isLandscape ? 'row' : 'column',
+          flexWrap: 'wrap',
+          justifyContent: 'space-between',
+        }}
+      >
+        {currentQuestion.answers.map((answer, idx) => {
+          let bg = '#1B4242';
           if (showCorrect) {
-            // ✅ show correct answer only at the end
-            if (idx === currentQuestion.correctIndex) {
-              bg = "green";
-            } else if (idx === selectedAnswer) {
-              bg = "red";
-            }
-          } else if (idx === selectedAnswer) {
-            // ❌ mark only the chosen option as red during the turn
-            bg = "red";
-          }
+            if (idx === currentQuestion.correctIndex) bg = '#5C8374';
+            else if (idx === selectedAnswer) bg = 'red';
+          } else if (idx === selectedAnswer) bg = 'red';
 
           return (
             <TouchableOpacity
               key={idx}
-              style={[styles.answerBtn, { backgroundColor: bg }]}
+              style={[styles.answerBtn, { backgroundColor: bg, flex: isLandscape ? 0.45 : 1 }]}
               onPress={() => handleAnswer(idx)}
               disabled={selectedAnswer !== null || showCorrect}
             >
@@ -188,66 +217,72 @@ export default function GameScreen() {
           {t.name}: {t.points} pts
         </Text>
       ))}
-    </View>
+    </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
-    flex: 1,
     padding: 20,
-    justifyContent: "flex-start",
-    backgroundColor: "#fff",
+    backgroundColor: '#092635',
+    flexGrow: 1,
+    alignItems: 'center',
   },
   title: {
     fontSize: 24,
-    fontWeight: "bold",
+    fontWeight: 'bold',
     marginBottom: 10,
+    color: '#9EC8B9',
+    textAlign: 'center',
   },
   timer: {
-    fontSize: 20,
-    color: "red",
-    marginBottom: 20,
+    fontSize: 48,
+    fontWeight: 'bold',
+    color: 'red',
+    textAlign: 'center',
+    marginVertical: 15,
   },
   question: {
     fontSize: 22,
-    fontWeight: "600",
+    fontWeight: '600',
     marginBottom: 20,
-    textAlign: "center",
-  },
-  answers: {
-    marginTop: 10,
-    marginBottom: 20,
+    textAlign: 'center',
+    color: '#9EC8B9',
   },
   answerBtn: {
     padding: 15,
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: "#ddd",
+    borderColor: '#5C8374',
     marginVertical: 8,
+    marginHorizontal: 4,
   },
   answerText: {
     fontSize: 18,
-    textAlign: "center",
+    textAlign: 'center',
+    color: '#fff',
   },
   nextBtn: {
-    backgroundColor: "#007bff",
+    backgroundColor: '#5C8374',
     padding: 12,
     borderRadius: 8,
     marginVertical: 10,
   },
   nextText: {
-    color: "#fff",
+    color: '#fff',
     fontSize: 18,
-    textAlign: "center",
+    textAlign: 'center',
+    fontWeight: 'bold',
   },
   scoreboardTitle: {
     fontSize: 20,
-    fontWeight: "bold",
+    fontWeight: 'bold',
     marginTop: 15,
     marginBottom: 5,
+    color: '#9EC8B9',
   },
   scoreText: {
     fontSize: 18,
+    color: '#9EC8B9',
   },
 });

@@ -1,6 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
 type Team = {
@@ -18,9 +18,7 @@ export default function FinalScreen() {
         const stored = await AsyncStorage.getItem('results');
         if (stored) {
           const parsed = JSON.parse(stored);
-          if (parsed.teams) {
-            setTeams(parsed.teams);
-          }
+          if (parsed.teams) setTeams(parsed.teams);
         }
       } catch (e) {
         console.error('Failed to load results', e);
@@ -34,7 +32,7 @@ export default function FinalScreen() {
       <View style={styles.container}>
         <Text style={styles.title}>No results found</Text>
         <TouchableOpacity style={styles.button} onPress={() => router.push('/')}>
-          <Text style={styles.buttonText}>Back to Setup</Text>
+          <Text style={styles.buttonText}>Back to Home</Text>
         </TouchableOpacity>
       </View>
     );
@@ -80,6 +78,13 @@ export default function FinalScreen() {
       >
         <Text style={styles.buttonText}>Restart Quiz</Text>
       </TouchableOpacity>
+
+      <TouchableOpacity
+        style={styles.button}
+        onPress={() => router.push('/quizlist')}
+      >
+        <Text style={styles.buttonText}>Go to Quiz List</Text>
+      </TouchableOpacity>
     </ScrollView>
   );
 }
@@ -90,53 +95,58 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     padding: 20,
-    backgroundColor: '#fff',
+    backgroundColor: '#092635', // dark background
   },
   title: {
     fontSize: 28,
     fontWeight: 'bold',
     marginBottom: 10,
+    color: '#9EC8B9',
+    textAlign: 'center',
   },
   winnerText: {
     fontSize: 20,
     marginBottom: 5,
+    color: '#9EC8B9',
   },
   winnerName: {
     fontSize: 22,
     fontWeight: 'bold',
-    color: 'green',
+    color: '#5C8374',
     marginBottom: 10,
   },
   subtitle: {
     fontSize: 18,
     marginTop: 15,
     marginBottom: 10,
+    color: '#9EC8B9',
   },
   teamBox: {
     padding: 10,
     borderWidth: 1,
-    borderColor: '#ddd',
+    borderColor: '#5C8374',
     borderRadius: 8,
     marginVertical: 5,
     width: '80%',
     alignItems: 'center',
   },
   winnerBox: {
-    backgroundColor: '#d4f7d4',
-    borderColor: 'green',
+    backgroundColor: '#5C8374',
   },
   teamText: {
     fontSize: 18,
+    color: '#fff',
   },
   button: {
     marginTop: 20,
-    backgroundColor: '#007bff',
+    backgroundColor: '#9EC8B9',
     paddingVertical: 12,
     paddingHorizontal: 24,
     borderRadius: 8,
   },
   buttonText: {
     fontSize: 18,
-    color: '#fff',
+    color: '#092635',
+    fontWeight: 'bold',
   },
 });
