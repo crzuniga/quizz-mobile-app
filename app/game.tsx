@@ -25,6 +25,8 @@ type Team = {
   points: number;
 };
 
+const BUZZ_COLORS = ['#C0392B', '#2980B9', '#27AE60', '#E67E22', '#8E44AD', '#16A085'];
+
 export default function GameScreen() {
   const [teams, setTeams] = useState<Team[]>([]);
   const [questions, setQuestions] = useState<Question[]>([]);
@@ -37,6 +39,10 @@ export default function GameScreen() {
   const [showCorrect, setShowCorrect] = useState(false);
   const [usedTeams, setUsedTeams] = useState<number[]>([]);
 
+  // Royale-specific state
+  const [buzzedTeam, setBuzzedTeam] = useState<number | null>(null);
+  const [usedBuzzTeams, setUsedBuzzTeams] = useState<number[]>([]);
+
   const [screenWidth, setScreenWidth] = useState(Dimensions.get('window').width);
   const [screenHeight, setScreenHeight] = useState(Dimensions.get('window').height);
   const isLandscape = screenWidth > screenHeight;
@@ -45,7 +51,9 @@ export default function GameScreen() {
   const router = useRouter();
   const route = useRoute();
 
-  // Detect orientation changes
+  const mode = (route.params as any)?.mode ?? 'classic';
+  const isRoyale = mode === 'royale';
+
   useEffect(() => {
     const subscription = Dimensions.addEventListener('change', ({ window }) => {
       setScreenWidth(window.width);
@@ -54,31 +62,25 @@ export default function GameScreen() {
     return () => subscription?.remove();
   }, []);
 
-  // Load quiz setup
   useEffect(() => {
     const loadQuiz = async (quizId: string) => {
       const stored = await AsyncStorage.getItem('quizzes');
       if (stored) {
         const parsed = JSON.parse(stored);
         const allQuizzes = Array.isArray(parsed) ? parsed : [parsed];
-
-        // Find the quiz with the matching id
         const quiz = allQuizzes.find((q: any) => q.id === quizId);
         if (quiz) {
           setTeams(quiz.teams.map((t: any) => ({ ...t, points: 0 })));
           setQuestions(quiz.questions);
           setTimePerQuestion(quiz.timePerQuestion || 15);
           setTimeLeft(quiz.timePerQuestion || 15);
-        } else {
-          console.warn("Quiz not found with id:", quizId);
         }
       }
     };
-    const quizId = route.params?.id; // or useSearchParams if using expo-router
-  if (quizId) loadQuiz(quizId);
+    const quizId = (route.params as any)?.id;
+    if (quizId) loadQuiz(quizId);
   }, []);
 
-  // Countdown timer
   useEffect(() => {
     if (showCorrect) return;
     if (timeLeft <= 0) {
@@ -93,10 +95,18 @@ export default function GameScreen() {
 
   const currentQuestion = questions[currentQuestionIndex];
 
+  const handleBuzzIn = (teamIndex: number) => {
+    setBuzzedTeam(teamIndex);
+    setCurrentTeamIndex(teamIndex);
+  };
+
   const handleAnswer = (index: number) => {
     if (selectedAnswer !== null || showCorrect) return;
     setSelectedAnswer(index);
-    setUsedTeams(prev => [...prev, currentTeamIndex]);
+
+    if (!isRoyale) {
+      setUsedTeams(prev => [...prev, currentTeamIndex]);
+    }
 
     const correct = index === currentQuestion.correctIndex;
     if (correct) {
@@ -113,19 +123,45 @@ export default function GameScreen() {
   const handleWrongAnswer = () => {
     if (timerRef.current) clearTimeout(timerRef.current);
 
-    const nextTeamIndex = teams.findIndex(
-      (_, idx) => !usedTeams.includes(idx) && idx !== currentTeamIndex
-    );
+    if (isRoyale) {
+      const currentBuzzed = buzzedTeam;
 
-    if (nextTeamIndex !== -1) {
-      setTimeout(() => {
-        setCurrentTeamIndex(nextTeamIndex);
-        setSelectedAnswer(null);
-        setTimeLeft(timePerQuestion);
-      }, 500);
+      if (currentBuzzed === null) {
+        // Timer expired with nobody buzzing in
+        setShowCorrect(true);
+        setTimeLeft(0);
+        return;
+      }
+
+      const newUsedBuzz = [...usedBuzzTeams, currentBuzzed];
+      const hasRemaining = teams.some((_, idx) => !newUsedBuzz.includes(idx));
+
+      if (hasRemaining) {
+        setTimeout(() => {
+          setUsedBuzzTeams(newUsedBuzz);
+          setBuzzedTeam(null);
+          setSelectedAnswer(null);
+        }, 1500);
+      } else {
+        setUsedBuzzTeams(newUsedBuzz);
+        setShowCorrect(true);
+        setTimeLeft(0);
+      }
     } else {
-      setShowCorrect(true);
-      setTimeLeft(0);
+      const nextTeamIndex = teams.findIndex(
+        (_, idx) => !usedTeams.includes(idx) && idx !== currentTeamIndex
+      );
+
+      if (nextTeamIndex !== -1) {
+        setTimeout(() => {
+          setCurrentTeamIndex(nextTeamIndex);
+          setSelectedAnswer(null);
+          setTimeLeft(timePerQuestion);
+        }, 500);
+      } else {
+        setShowCorrect(true);
+        setTimeLeft(0);
+      }
     }
   };
 
@@ -137,6 +173,8 @@ export default function GameScreen() {
       setShowCorrect(false);
       setUsedTeams([]);
       setTimeLeft(timePerQuestion);
+      setBuzzedTeam(null);
+      setUsedBuzzTeams([]);
     } else {
       saveResultsAndFinish();
     }
@@ -155,9 +193,73 @@ export default function GameScreen() {
     );
   }
 
+  // --- Royale: buzz-in phase ---
+  if (isRoyale && buzzedTeam === null && !showCorrect) {
+    return (
+      <ScrollView contentContainerStyle={styles.container}>
+        <Text style={styles.modeBadge}>BATTLE ROYALE</Text>
+
+        <Text style={styles.timer}>⏱ {timeLeft}s</Text>
+
+        <Text style={styles.question}>{currentQuestion.text}</Text>
+
+        {currentQuestion.image ? (
+          <Image
+            source={{ uri: currentQuestion.image }}
+            style={{
+              width: screenWidth - 40,
+              height: isLandscape ? Math.min(screenHeight * 0.6, 300) : 180,
+              borderRadius: 10,
+              marginBottom: 20,
+            }}
+            resizeMode="contain"
+          />
+        ) : null}
+
+        <Text style={styles.buzzPrompt}>BUZZ IN!</Text>
+
+        <View style={styles.buzzGrid}>
+          {teams.map((team, idx) => {
+            const eliminated = usedBuzzTeams.includes(idx);
+            return (
+              <TouchableOpacity
+                key={idx}
+                style={[
+                  styles.buzzBtn,
+                  { backgroundColor: eliminated ? '#444' : BUZZ_COLORS[idx % BUZZ_COLORS.length] },
+                ]}
+                onPress={() => handleBuzzIn(idx)}
+                disabled={eliminated}
+              >
+                <Text style={styles.buzzBtnText}>{team.name}</Text>
+                {eliminated && <Text style={styles.buzzElimText}>✗</Text>}
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+
+        <Text style={styles.scoreboardTitle}>Scoreboard</Text>
+        {teams.map((t, idx) => (
+          <Text key={idx} style={styles.scoreText}>
+            {t.name}: {t.points} pts
+          </Text>
+        ))}
+      </ScrollView>
+    );
+  }
+
+  // --- Royale: answer phase / Classic: answer phase / showCorrect ---
+  const headerLabel = isRoyale
+    ? buzzedTeam !== null
+      ? `${teams[buzzedTeam]?.name} buzzed in!`
+      : 'Revealing answer...'
+    : `Team Turn: ${teams[currentTeamIndex]?.name}`;
+
   return (
     <ScrollView contentContainerStyle={styles.container}>
-      <Text style={styles.title}>Team Turn: {teams[currentTeamIndex]?.name}</Text>
+      {isRoyale && <Text style={styles.modeBadge}>BATTLE ROYALE</Text>}
+
+      <Text style={styles.title}>{headerLabel}</Text>
 
       <Text style={styles.timer}>⏱ {timeLeft}s</Text>
 
@@ -168,9 +270,7 @@ export default function GameScreen() {
           source={{ uri: currentQuestion.image }}
           style={{
             width: screenWidth - 40,
-            height: isLandscape
-              ? Math.min(screenHeight * 0.6, 300)
-              : 180,
+            height: isLandscape ? Math.min(screenHeight * 0.6, 300) : 180,
             borderRadius: 10,
             marginBottom: 20,
           }}
@@ -183,6 +283,7 @@ export default function GameScreen() {
           flexDirection: isLandscape ? 'row' : 'column',
           flexWrap: 'wrap',
           justifyContent: 'space-between',
+          width: '100%',
         }}
       >
         {currentQuestion.answers.map((answer, idx) => {
@@ -228,6 +329,13 @@ const styles = StyleSheet.create({
     flexGrow: 1,
     alignItems: 'center',
   },
+  modeBadge: {
+    color: '#C39BD3',
+    fontSize: 12,
+    fontWeight: 'bold',
+    letterSpacing: 2,
+    marginBottom: 4,
+  },
   title: {
     fontSize: 24,
     fontWeight: 'bold',
@@ -248,6 +356,41 @@ const styles = StyleSheet.create({
     marginBottom: 20,
     textAlign: 'center',
     color: '#9EC8B9',
+  },
+  buzzPrompt: {
+    fontSize: 32,
+    fontWeight: 'bold',
+    color: '#C39BD3',
+    letterSpacing: 4,
+    marginBottom: 20,
+    textAlign: 'center',
+  },
+  buzzGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+    gap: 12,
+    marginBottom: 24,
+    width: '100%',
+  },
+  buzzBtn: {
+    paddingVertical: 28,
+    paddingHorizontal: 16,
+    borderRadius: 12,
+    minWidth: 130,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  buzzBtnText: {
+    color: '#fff',
+    fontSize: 20,
+    fontWeight: 'bold',
+    textAlign: 'center',
+  },
+  buzzElimText: {
+    color: 'rgba(255,255,255,0.6)',
+    fontSize: 18,
+    marginTop: 4,
   },
   answerBtn: {
     padding: 15,

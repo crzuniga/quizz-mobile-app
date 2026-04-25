@@ -1,7 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
 type Quiz = {
   id: string;
@@ -14,6 +14,8 @@ type Quiz = {
 export default function QuizListScreen() {
   const router = useRouter();
   const [quizzes, setQuizzes] = useState<Quiz[]>([]);
+  const [showModeModal, setShowModeModal] = useState(false);
+  const [pendingQuizId, setPendingQuizId] = useState<string | null>(null);
 
   // Load quizzes from AsyncStorage
   useEffect(() => {
@@ -30,7 +32,13 @@ export default function QuizListScreen() {
   }, []);
 
   const handlePlay = (id: string) => {
-    router.push(`/game?id=${id}`);
+    setPendingQuizId(id);
+    setShowModeModal(true);
+  };
+
+  const selectMode = (mode: 'classic' | 'royale') => {
+    setShowModeModal(false);
+    if (pendingQuizId) router.push(`/game?id=${pendingQuizId}&mode=${mode}`);
   };
 
   const handleEdit = (id: string) => {
@@ -73,6 +81,28 @@ export default function QuizListScreen() {
       <TouchableOpacity style={styles.newBtn} onPress={handleNewQuiz}>
         <Text style={styles.newBtnText}>+ New Quiz</Text>
       </TouchableOpacity>
+
+      <Modal transparent animationType="fade" visible={showModeModal} onRequestClose={() => setShowModeModal(false)}>
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalBox}>
+            <Text style={styles.modalTitle}>Select Game Mode</Text>
+
+            <TouchableOpacity style={styles.modeBtn} onPress={() => selectMode('classic')}>
+              <Text style={styles.modeBtnTitle}>Classic</Text>
+              <Text style={styles.modeBtnDesc}>Teams take turns. Wrong answer passes to the next team.</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity style={[styles.modeBtn, styles.modeBtnRoyale]} onPress={() => selectMode('royale')}>
+              <Text style={styles.modeBtnTitle}>Battle Royale</Text>
+              <Text style={styles.modeBtnDesc}>Question appears for all. First team to buzz in gets to answer.</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity style={styles.cancelBtn} onPress={() => setShowModeModal(false)}>
+              <Text style={styles.cancelText}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </ScrollView>
   );
 }
@@ -155,5 +185,54 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 16,
     fontWeight: '600',
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.7)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24,
+  },
+  modalBox: {
+    backgroundColor: '#1B4242',
+    borderRadius: 12,
+    padding: 24,
+    width: '100%',
+    maxWidth: 400,
+  },
+  modalTitle: {
+    fontSize: 22,
+    fontWeight: 'bold',
+    color: '#9EC8B9',
+    textAlign: 'center',
+    marginBottom: 20,
+  },
+  modeBtn: {
+    backgroundColor: '#5C8374',
+    borderRadius: 10,
+    padding: 16,
+    marginBottom: 12,
+  },
+  modeBtnRoyale: {
+    backgroundColor: '#7B4F9E',
+  },
+  modeBtnTitle: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: 'bold',
+    marginBottom: 4,
+  },
+  modeBtnDesc: {
+    color: '#ddd',
+    fontSize: 13,
+  },
+  cancelBtn: {
+    marginTop: 4,
+    padding: 12,
+    alignItems: 'center',
+  },
+  cancelText: {
+    color: '#9EC8B9',
+    fontSize: 16,
   },
 });
