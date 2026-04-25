@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from 'react';
 import {
   Dimensions,
   Image,
+  Modal,
   ScrollView,
   StyleSheet,
   Text,
@@ -25,7 +26,7 @@ type Team = {
   points: number;
 };
 
-const BUZZ_COLORS = ['#C0392B', '#2980B9', '#27AE60', '#E67E22', '#8E44AD', '#16A085'];
+const TEAM_COLORS = ['#C0392B', '#2980B9', '#27AE60', '#E67E22', '#8E44AD', '#16A085'];
 
 export default function GameScreen() {
   const [teams, setTeams] = useState<Team[]>([]);
@@ -40,8 +41,8 @@ export default function GameScreen() {
   const [usedTeams, setUsedTeams] = useState<number[]>([]);
 
   // Royale-specific state
-  const [buzzedTeam, setBuzzedTeam] = useState<number | null>(null);
-  const [usedBuzzTeams, setUsedBuzzTeams] = useState<number[]>([]);
+  const [wrongAnswers, setWrongAnswers] = useState<number[]>([]);
+  const [pendingAward, setPendingAward] = useState<number | null>(null);
 
   const [screenWidth, setScreenWidth] = useState(Dimensions.get('window').width);
   const [screenHeight, setScreenHeight] = useState(Dimensions.get('window').height);
@@ -84,7 +85,7 @@ export default function GameScreen() {
   useEffect(() => {
     if (showCorrect) return;
     if (timeLeft <= 0) {
-      handleWrongAnswer();
+      handleTimerExpired();
       return;
     }
     timerRef.current = setTimeout(() => setTimeLeft(prev => prev - 1), 1000);
@@ -95,63 +96,17 @@ export default function GameScreen() {
 
   const currentQuestion = questions[currentQuestionIndex];
 
-  const handleBuzzIn = (teamIndex: number) => {
-    setBuzzedTeam(teamIndex);
-    setCurrentTeamIndex(teamIndex);
-  };
-
-  const handleAnswer = (index: number) => {
-    if (selectedAnswer !== null || showCorrect) return;
-    setSelectedAnswer(index);
-
-    if (!isRoyale) {
-      setUsedTeams(prev => [...prev, currentTeamIndex]);
-    }
-
-    const correct = index === currentQuestion.correctIndex;
-    if (correct) {
-      const updatedTeams = [...teams];
-      updatedTeams[currentTeamIndex].points += currentQuestion.points || 50;
-      setTeams(updatedTeams);
-      setShowCorrect(true);
-      if (timerRef.current) clearTimeout(timerRef.current);
-    } else {
-      setTimeout(() => handleWrongAnswer(), 1500);
-    }
-  };
-
-  const handleWrongAnswer = () => {
+  const handleTimerExpired = () => {
     if (timerRef.current) clearTimeout(timerRef.current);
 
     if (isRoyale) {
-      const currentBuzzed = buzzedTeam;
-
-      if (currentBuzzed === null) {
-        // Timer expired with nobody buzzing in
-        setShowCorrect(true);
-        setTimeLeft(0);
-        return;
-      }
-
-      const newUsedBuzz = [...usedBuzzTeams, currentBuzzed];
-      const hasRemaining = teams.some((_, idx) => !newUsedBuzz.includes(idx));
-
-      if (hasRemaining) {
-        setTimeout(() => {
-          setUsedBuzzTeams(newUsedBuzz);
-          setBuzzedTeam(null);
-          setSelectedAnswer(null);
-        }, 1500);
-      } else {
-        setUsedBuzzTeams(newUsedBuzz);
-        setShowCorrect(true);
-        setTimeLeft(0);
-      }
+      // Time's up — reveal correct answer, no points awarded
+      setShowCorrect(true);
+      setTimeLeft(0);
     } else {
       const nextTeamIndex = teams.findIndex(
         (_, idx) => !usedTeams.includes(idx) && idx !== currentTeamIndex
       );
-
       if (nextTeamIndex !== -1) {
         setTimeout(() => {
           setCurrentTeamIndex(nextTeamIndex);
@@ -165,6 +120,58 @@ export default function GameScreen() {
     }
   };
 
+  const handleRoyaleAnswer = (index: number) => {
+    if (wrongAnswers.includes(index) || showCorrect) return;
+
+    if (index === currentQuestion.correctIndex) {
+      setSelectedAnswer(index);
+      setShowCorrect(true);
+      if (timerRef.current) clearTimeout(timerRef.current);
+      setPendingAward(currentQuestion.points || 50);
+    } else {
+      setWrongAnswers(prev => [...prev, index]);
+    }
+  };
+
+  const handleClassicAnswer = (index: number) => {
+    if (selectedAnswer !== null || showCorrect) return;
+    setSelectedAnswer(index);
+    setUsedTeams(prev => [...prev, currentTeamIndex]);
+
+    const correct = index === currentQuestion.correctIndex;
+    if (correct) {
+      const updatedTeams = [...teams];
+      updatedTeams[currentTeamIndex].points += currentQuestion.points || 50;
+      setTeams(updatedTeams);
+      setShowCorrect(true);
+      if (timerRef.current) clearTimeout(timerRef.current);
+    } else {
+      setTimeout(() => {
+        if (timerRef.current) clearTimeout(timerRef.current);
+        const nextTeamIndex = teams.findIndex(
+          (_, idx) => !usedTeams.includes(idx) && idx !== currentTeamIndex
+        );
+        if (nextTeamIndex !== -1) {
+          setTimeout(() => {
+            setCurrentTeamIndex(nextTeamIndex);
+            setSelectedAnswer(null);
+            setTimeLeft(timePerQuestion);
+          }, 500);
+        } else {
+          setShowCorrect(true);
+          setTimeLeft(0);
+        }
+      }, 1500);
+    }
+  };
+
+  const awardPointsToTeam = (teamIndex: number) => {
+    const updatedTeams = [...teams];
+    updatedTeams[teamIndex].points += pendingAward!;
+    setTeams(updatedTeams);
+    setPendingAward(null);
+  };
+
   const goToNextQuestion = () => {
     if (currentQuestionIndex < questions.length - 1) {
       setCurrentQuestionIndex(prev => prev + 1);
@@ -173,8 +180,8 @@ export default function GameScreen() {
       setShowCorrect(false);
       setUsedTeams([]);
       setTimeLeft(timePerQuestion);
-      setBuzzedTeam(null);
-      setUsedBuzzTeams([]);
+      setWrongAnswers([]);
+      setPendingAward(null);
     } else {
       saveResultsAndFinish();
     }
@@ -193,112 +200,59 @@ export default function GameScreen() {
     );
   }
 
-  // --- Royale: buzz-in phase ---
-  if (isRoyale && buzzedTeam === null && !showCorrect) {
-    return (
-      <ScrollView contentContainerStyle={styles.container}>
-        <Text style={styles.modeBadge}>BATTLE ROYALE</Text>
-
-        <Text style={styles.timer}>⏱ {timeLeft}s</Text>
-
-        <Text style={styles.question}>{currentQuestion.text}</Text>
-
-        {currentQuestion.image ? (
-          <Image
-            source={{ uri: currentQuestion.image }}
-            style={{
-              width: screenWidth - 40,
-              height: isLandscape ? Math.min(screenHeight * 0.6, 300) : 180,
-              borderRadius: 10,
-              marginBottom: 20,
-            }}
-            resizeMode="contain"
-          />
-        ) : null}
-
-        <Text style={styles.buzzPrompt}>BUZZ IN!</Text>
-
-        <View style={styles.buzzGrid}>
-          {teams.map((team, idx) => {
-            const eliminated = usedBuzzTeams.includes(idx);
-            return (
-              <TouchableOpacity
-                key={idx}
-                style={[
-                  styles.buzzBtn,
-                  { backgroundColor: eliminated ? '#444' : BUZZ_COLORS[idx % BUZZ_COLORS.length] },
-                ]}
-                onPress={() => handleBuzzIn(idx)}
-                disabled={eliminated}
-              >
-                <Text style={styles.buzzBtnText}>{team.name}</Text>
-                {eliminated && <Text style={styles.buzzElimText}>✗</Text>}
-              </TouchableOpacity>
-            );
-          })}
-        </View>
-
-        <Text style={styles.scoreboardTitle}>Scoreboard</Text>
-        {teams.map((t, idx) => (
-          <Text key={idx} style={styles.scoreText}>
-            {t.name}: {t.points} pts
-          </Text>
-        ))}
-      </ScrollView>
-    );
-  }
-
-  // --- Royale: answer phase / Classic: answer phase / showCorrect ---
-  const headerLabel = isRoyale
-    ? buzzedTeam !== null
-      ? `${teams[buzzedTeam]?.name} buzzed in!`
-      : 'Revealing answer...'
-    : `Team Turn: ${teams[currentTeamIndex]?.name}`;
+  const imageEl = currentQuestion.image ? (
+    <Image
+      source={{ uri: currentQuestion.image }}
+      style={{
+        width: screenWidth - 40,
+        height: isLandscape ? Math.min(screenHeight * 0.6, 300) : 180,
+        borderRadius: 10,
+        marginBottom: 20,
+      }}
+      resizeMode="contain"
+    />
+  ) : null;
 
   return (
     <ScrollView contentContainerStyle={styles.container}>
-      {isRoyale && <Text style={styles.modeBadge}>BATTLE ROYALE</Text>}
-
-      <Text style={styles.title}>{headerLabel}</Text>
+      {isRoyale ? (
+        <Text style={styles.modeBadge}>BATTLE ROYALE</Text>
+      ) : (
+        <Text style={styles.title}>Team Turn: {teams[currentTeamIndex]?.name}</Text>
+      )}
 
       <Text style={styles.timer}>⏱ {timeLeft}s</Text>
-
       <Text style={styles.question}>{currentQuestion.text}</Text>
+      {imageEl}
 
-      {currentQuestion.image ? (
-        <Image
-          source={{ uri: currentQuestion.image }}
-          style={{
-            width: screenWidth - 40,
-            height: isLandscape ? Math.min(screenHeight * 0.6, 300) : 180,
-            borderRadius: 10,
-            marginBottom: 20,
-          }}
-          resizeMode="contain"
-        />
-      ) : null}
-
-      <View
-        style={{
-          flexDirection: isLandscape ? 'row' : 'column',
-          flexWrap: 'wrap',
-          justifyContent: 'space-between',
-          width: '100%',
-        }}
-      >
+      <View style={styles.answersContainer}>
         {currentQuestion.answers.map((answer, idx) => {
           let bg = '#1B4242';
-          if (showCorrect) {
-            if (idx === currentQuestion.correctIndex) bg = '#5C8374';
-            else if (idx === selectedAnswer) bg = 'red';
-          } else if (idx === selectedAnswer) bg = 'red';
+
+          if (isRoyale) {
+            if (wrongAnswers.includes(idx)) bg = '#7B2020';
+            if (showCorrect && idx === currentQuestion.correctIndex) bg = '#5C8374';
+          } else {
+            if (showCorrect) {
+              if (idx === currentQuestion.correctIndex) bg = '#5C8374';
+              else if (idx === selectedAnswer) bg = '#7B2020';
+            } else if (idx === selectedAnswer) bg = '#7B2020';
+          }
+
+          const isDisabled = isRoyale
+            ? wrongAnswers.includes(idx) || showCorrect
+            : selectedAnswer !== null || showCorrect;
 
           return (
             <TouchableOpacity
               key={idx}
-              style={[styles.answerBtn, { backgroundColor: bg, flex: isLandscape ? 0.45 : 1 }]}
-              onPress={() => handleAnswer(idx)}
-              disabled={selectedAnswer !== null || showCorrect}
+              style={[
+                styles.answerBtn,
+                { backgroundColor: bg },
+                isLandscape && styles.answerBtnLandscape,
+              ]}
+              onPress={() => isRoyale ? handleRoyaleAnswer(idx) : handleClassicAnswer(idx)}
+              disabled={isDisabled}
             >
               <Text style={styles.answerText}>{answer}</Text>
             </TouchableOpacity>
@@ -306,7 +260,7 @@ export default function GameScreen() {
         })}
       </View>
 
-      {showCorrect && (
+      {showCorrect && pendingAward === null && (
         <TouchableOpacity style={styles.nextBtn} onPress={goToNextQuestion}>
           <Text style={styles.nextText}>Next Question ➡️</Text>
         </TouchableOpacity>
@@ -318,6 +272,25 @@ export default function GameScreen() {
           {t.name}: {t.points} pts
         </Text>
       ))}
+
+      {/* Team picker modal — shown after correct answer in Royale */}
+      <Modal transparent animationType="fade" visible={pendingAward !== null}>
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalBox}>
+            <Text style={styles.modalTitle}>Who answered correctly?</Text>
+            <Text style={styles.modalSubtitle}>+{pendingAward} pts</Text>
+            {teams.map((team, idx) => (
+              <TouchableOpacity
+                key={idx}
+                style={[styles.teamPickerBtn, { backgroundColor: TEAM_COLORS[idx % TEAM_COLORS.length] }]}
+                onPress={() => awardPointsToTeam(idx)}
+              >
+                <Text style={styles.teamPickerText}>{team.name}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        </View>
+      </Modal>
     </ScrollView>
   );
 }
@@ -331,7 +304,7 @@ const styles = StyleSheet.create({
   },
   modeBadge: {
     color: '#C39BD3',
-    fontSize: 12,
+    fontSize: 13,
     fontWeight: 'bold',
     letterSpacing: 2,
     marginBottom: 4,
@@ -357,48 +330,22 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     color: '#9EC8B9',
   },
-  buzzPrompt: {
-    fontSize: 32,
-    fontWeight: 'bold',
-    color: '#C39BD3',
-    letterSpacing: 4,
-    marginBottom: 20,
-    textAlign: 'center',
-  },
-  buzzGrid: {
+  answersContainer: {
+    alignSelf: 'stretch',
     flexDirection: 'row',
     flexWrap: 'wrap',
-    justifyContent: 'center',
-    gap: 12,
-    marginBottom: 24,
-    width: '100%',
-  },
-  buzzBtn: {
-    paddingVertical: 28,
-    paddingHorizontal: 16,
-    borderRadius: 12,
-    minWidth: 130,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  buzzBtnText: {
-    color: '#fff',
-    fontSize: 20,
-    fontWeight: 'bold',
-    textAlign: 'center',
-  },
-  buzzElimText: {
-    color: 'rgba(255,255,255,0.6)',
-    fontSize: 18,
-    marginTop: 4,
+    justifyContent: 'space-between',
   },
   answerBtn: {
+    width: '100%',
     padding: 15,
     borderRadius: 8,
     borderWidth: 1,
     borderColor: '#5C8374',
     marginVertical: 8,
-    marginHorizontal: 4,
+  },
+  answerBtnLandscape: {
+    width: '48%',
   },
   answerText: {
     fontSize: 18,
@@ -427,5 +374,44 @@ const styles = StyleSheet.create({
   scoreText: {
     fontSize: 18,
     color: '#9EC8B9',
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.75)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24,
+  },
+  modalBox: {
+    backgroundColor: '#1B4242',
+    borderRadius: 12,
+    padding: 24,
+    width: '100%',
+    maxWidth: 400,
+  },
+  modalTitle: {
+    fontSize: 22,
+    fontWeight: 'bold',
+    color: '#9EC8B9',
+    textAlign: 'center',
+    marginBottom: 4,
+  },
+  modalSubtitle: {
+    fontSize: 16,
+    color: '#5C8374',
+    textAlign: 'center',
+    marginBottom: 20,
+    fontWeight: '600',
+  },
+  teamPickerBtn: {
+    padding: 16,
+    borderRadius: 10,
+    marginBottom: 12,
+    alignItems: 'center',
+  },
+  teamPickerText: {
+    color: '#fff',
+    fontSize: 20,
+    fontWeight: 'bold',
   },
 });
